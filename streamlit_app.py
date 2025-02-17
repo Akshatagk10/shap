@@ -6,93 +6,153 @@ import shap
 import matplotlib.pyplot as plt
 from tensorflow.keras import layers, losses, Model
 from sklearn.model_selection import train_test_split
+import warnings
 
-# Set Streamlit page config
+warnings.filterwarnings("ignore")
 st.set_page_config(page_title="SHAP ECG Anomaly Detection", page_icon="💓", layout="wide")
 
-# Load Data
+# ---------------------------
+# Data Loading & Preprocessing
+# ---------------------------
 @st.cache_data
 def load_data(file=None):
-    if file:
+    url = "http://storage.googleapis.com/download.tensorflow.org/data/ecg.csv"
+    if file is not None:
         df = pd.read_csv(file)
     else:
-        df = pd.read_csv('http://storage.googleapis.com/download.tensorflow.org/data/ecg.csv', header=None)
+        df = pd.read_csv(url, header=None)
     return df
 
-# Define Autoencoder Model
-class ECG_Autoencoder(Model):
-    def __init__(self):
-        super(ECG_Autoencoder, self).__init__()
-        self.encoder = tf.keras.Sequential([
-            layers.Dense(64, activation='relu'),
-            layers.Dense(32, activation='relu'),
-            layers.Dense(16, activation='relu')
-        ])
-        self.decoder = tf.keras.Sequential([
-            layers.Dense(32, activation='relu'),
-            layers.Dense(64, activation='relu'),
-            layers.Dense(140, activation='sigmoid')
-        ])
-
-    def call(self, x):
-        encoded = self.encoder(x)
-        decoded = self.decoder(encoded)
-        return decoded
-
-# Load Model
-@st.cache_resource
-def load_model():
-    model = ECG_Autoencoder()
-    model.compile(optimizer='adam', loss='mse')
-    return model
-
-# Load dataset
+# Allow user to upload data; otherwise, load default dataset.
 uploaded_file = st.sidebar.file_uploader("Upload your ECG data (CSV)", type=["csv"])
 df = load_data(uploaded_file)
 
 if df is not None:
+    # Assume last column is the label (True = Normal, False = Anomaly)
     data = df.iloc[:, :-1].values
     labels = df.iloc[:, -1].values.astype(bool)
 
-    # Split Data
-    train_data, test_data, train_labels, test_labels = train_test_split(data, labels, test_size=0.2, random_state=21)
-    
-    # Normalize Data
+    # Split into training and test sets
+    train_data, test_data, train_labels, test_labels = train_test_split(
+        data, labels, test_size=0.2, random_state=21
+    )
+
+    # Normalize: Scale features to [0, 1]
     min_val, max_val = np.min(train_data), np.max(train_data)
     train_data = (train_data - min_val) / (max_val - min_val)
     test_data = (test_data - min_val) / (max_val - min_val)
-    
+
+    # Use only normal samples (label==True) for training
     normal_train = train_data[train_labels]
+    # For testing, separate normal and anomalous examples
     normal_test = test_data[test_labels]
     anomaly_test = test_data[~test_labels]
+    
+    # ---------------------------
+    # Model Definition & Training
+    # ---------------------------
+    class ECG_Autoencoder(Model):
+        def __init__(self):
+            super(ECG_Autoencoder, self).__init__()
+            self.encoder = tf.keras.Sequential([
+                layers.Dense(128, activation='relu'),
+                layers.BatchNormalization(),
+                layers.Dropout(0.2),
+                layers.Dense(64, activation='relu'),
+                layers.Dense(32, activation='relu')
+            ])
+            self.decoder = tf.keras.Sequential([
+                layers.Dense(64, activation='relu'),
+                layers.Dense(128, activation='relu'),
+                layers.Dense(140, activation='sigmoid')
+            ])
+        def call(self, x):
+            encoded = self.encoder(x)
+            decoded = self.decoder(encoded)
+            return decoded
 
-    # Train Autoencoder
+    @st.cache_resource
+    def load_model():
+        model = ECG_Autoencoder()
+        model.compile(optimizer='adam', loss='mse')
+        # Train only on normal ECG data
+        model.fit(normal_train, normal_train, epochs=100, batch_size=256, validation_split=0.1, verbose=1)
+        return model
+
     autoencoder = load_model()
-    autoencoder.fit(normal_train, normal_train, epochs=50, batch_size=256, validation_data=(normal_test, normal_test), verbose=1)
     
-    # Compute Anomaly Scores
-    def compute_anomaly_score(data):
-        reconstructions = autoencoder(data)
-        loss = tf.keras.losses.mse(data, reconstructions)
+    # ---------------------------
+    # Anomaly Score & Threshold
+    # ---------------------------
+    # Define anomaly score as the mean squared error between input and reconstruction.
+    def compute_anomaly_score(x):
+        reconstructions = autoencoder(x)
+        loss = tf.keras.losses.mse(x, reconstructions)
         return np.mean(loss, axis=1)
-    
-    # SHAP Explanation
-    def shap_explanation(data, index):
-        explainer = shap.DeepExplainer(autoencoder.encoder, normal_train[:100])
-        shap_values = explainer.shap_values(data[index:index+1])
-        shap.summary_plot(shap_values, data[index:index+1], feature_names=[f"Feature {i}" for i in range(data.shape[1])])
-        st.pyplot()
-    
-    # Sidebar Inputs
-    st.sidebar.title("ECG Anomaly Detection")
-    ecg_type = st.sidebar.selectbox("Select ECG Type", ["Normal ECG", "Abnormal ECG"])
-    ecg_index = st.sidebar.slider("Select ECG Index", 0, len(normal_test)-1, 0)
-    show_shap = st.sidebar.checkbox("Show SHAP Explanation", False)
 
-    # Display Results
-    st.write("### ECG Data Sample")
-    st.line_chart(test_data[ecg_index])
+    # Set dynamic threshold (e.g., 99th percentile of normal training scores)
+    train_loss = compute_anomaly_score(normal_train)
+    threshold = np.percentile(train_loss, 99)
+    
+    # Anomaly detection: sample is anomaly if reconstruction error > threshold.
+    def is_anomaly(x):
+        scores = compute_anomaly_score(x)
+        return scores > threshold
+
+    # Compute overall accuracy on the test set.
+    # For normal samples (label True) we expect is_anomaly -> False;
+    # For anomalous samples (label False) we expect is_anomaly -> True.
+    test_preds = is_anomaly(test_data)
+    overall_accuracy = np.mean(test_preds == (~test_labels)) * 100
+    st.sidebar.write(f"**Overall Anomaly Detection Accuracy: {overall_accuracy:.2f}%**")
+    
+    # ---------------------------
+    # SHAP Explanation Setup
+    # ---------------------------
+    # Create a wrapper model that outputs a scalar anomaly score.
+    def anomaly_score_model(x):
+        reconstruction = autoencoder(x)
+        return tf.reduce_mean(tf.square(x - reconstruction), axis=1, keepdims=True)
+    
+    # Use a background of 100 normal samples for DeepExplainer.
+    background = normal_train[:100].astype(np.float32)
+    
+    def shap_explanation(data, index):
+        sample = data[index:index+1].astype(np.float32)
+        explainer = shap.DeepExplainer(anomaly_score_model, background)
+        shap_values = explainer.shap_values(sample)
+        # shap_values is a list with one array (because the model outputs a scalar)
+        fig, ax = plt.subplots(figsize=(10, 5))
+        shap.summary_plot(shap_values[0], sample,
+                          feature_names=[f"Feature {i}" for i in range(data.shape[1])],
+                          show=False)
+        st.pyplot(fig)
+    
+    # ---------------------------
+    # Visualization
+    # ---------------------------
+    st.sidebar.title("ECG Anomaly Detection")
+    ecg_type = st.sidebar.selectbox("Select ECG Type", ["Normal ECG", "Anomalous ECG"])
+    # Choose appropriate data for display
+    display_data = normal_test if ecg_type == "Normal ECG" else anomaly_test
+    ecg_index = st.sidebar.slider("Select ECG Index", 0, len(display_data)-1, 0)
+    show_shap = st.sidebar.checkbox("Show SHAP Explanation", False)
+    
+    # Plot the selected ECG sample and its reconstruction.
+    def plot_ecg(data, index):
+        sample = data[index:index+1]
+        reconstruction = autoencoder(sample).numpy().squeeze()
+        original = sample.squeeze()
+        fig, ax = plt.subplots(figsize=(10, 4))
+        ax.plot(original, label="Original", color="blue")
+        ax.plot(reconstruction, label="Reconstruction", color="red", linestyle="--")
+        ax.fill_between(range(len(original)), original, reconstruction, color="lightcoral", alpha=0.5, label="Error")
+        ax.legend()
+        st.pyplot(fig)
+    
+    st.write("### ECG Sample")
+    plot_ecg(display_data, ecg_index)
     
     if show_shap:
-        st.write("### SHAP Explanation")
-        shap_explanation(normal_test if ecg_type == "Normal ECG" else anomaly_test, ecg_index)
+        st.write("### SHAP Explanation for Anomaly Score")
+        shap_explanation(display_data, ecg_index)
