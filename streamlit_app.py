@@ -125,12 +125,20 @@ def plot_ecg(data, index):
 
 # Function: SHAP Explanation
 def shap_explanation(data, index):
-    explainer = shap.KernelExplainer(compute_anomaly_score, normal_train[:50])
-    shap_values = explainer.shap_values(data[index:index+1])
+    # Convert Tensor to NumPy for SHAP compatibility
+    train_numpy = normal_train[:50].numpy()  # Convert to NumPy
 
+    # Define SHAP explainer with valid background data
+    explainer = shap.KernelExplainer(compute_anomaly_score, train_numpy)
+
+    # Compute SHAP values
+    shap_values = explainer.shap_values(data[index:index+1].numpy())  # Convert input to NumPy
+
+    # Plot SHAP summary
     fig, ax = plt.subplots(figsize=(10, 5))
-    shap.summary_plot(shap_values, data[index:index+1], plot_type="bar", show=False)
+    shap.summary_plot(shap_values, data[index:index+1].numpy(), plot_type="bar", show=False)
     st.pyplot(fig)
+
 
 # Sidebar Controls
 st.sidebar.title("ECG Anomaly Detection")
