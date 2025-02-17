@@ -109,7 +109,8 @@ else:
 def compute_anomaly_score(data):
     reconstructions = autoencoder(data)
     loss = losses.mse(reconstructions, data)
-    return tf.reduce_mean(loss, axis=1).numpy()
+    return tf.reduce_mean(loss, axis=1).numpy() if tf.executing_eagerly() else tf.reduce_mean(loss, axis=1).eval(session=tf.compat.v1.Session())
+
 
 # Function: Plot Original vs Reconstructed ECG
 def plot_ecg(data, index):
