@@ -4,12 +4,12 @@ import numpy as np
 import pandas as pd
 import shap
 import matplotlib.pyplot as plt
-from tensorflow.keras import layers, losses, Model
+from tensorflow.keras import layers, Model
 from sklearn.model_selection import train_test_split
 import warnings
 
 warnings.filterwarnings("ignore")
-st.set_page_config(page_title="SHAP ECG Anomaly Detection", page_icon="💓", layout="wide")
+st.set_page_config(page_title="ECG Anomaly Detection", page_icon="💓", layout="wide")
 
 # ---------------------------
 # Data Loading & Preprocessing
@@ -28,7 +28,7 @@ uploaded_file = st.sidebar.file_uploader("Upload your ECG data (CSV)", type=["cs
 df = load_data(uploaded_file)
 
 if df is not None:
-    # Assume last column is the label (True = Normal, False = Anomaly)
+    # Assume the last column is the label: True (normal) and False (anomaly)
     data = df.iloc[:, :-1].values
     labels = df.iloc[:, -1].values.astype(bool)
 
@@ -37,17 +37,17 @@ if df is not None:
         data, labels, test_size=0.2, random_state=21
     )
 
-    # Normalize: Scale features to [0, 1]
+    # Normalize: scale features to [0, 1]
     min_val, max_val = np.min(train_data), np.max(train_data)
     train_data = (train_data - min_val) / (max_val - min_val)
     test_data = (test_data - min_val) / (max_val - min_val)
 
-    # Use only normal samples (label==True) for training
+    # Use only normal samples for training (i.e. where label==True)
     normal_train = train_data[train_labels]
     # For testing, separate normal and anomalous examples
-    normal_test = test_data[test_labels]
-    anomaly_test = test_data[~test_labels]
-    
+    normal_test = test_data[train_labels]
+    anomaly_test = test_data[~train_labels]
+
     # ---------------------------
     # Model Definition & Training
     # ---------------------------
@@ -66,6 +66,7 @@ if df is not None:
                 layers.Dense(128, activation='relu'),
                 layers.Dense(140, activation='sigmoid')
             ])
+
         def call(self, x):
             encoded = self.encoder(x)
             decoded = self.decoder(encoded)
@@ -80,64 +81,65 @@ if df is not None:
         return model
 
     autoencoder = load_model()
-    
+
     # ---------------------------
     # Anomaly Score & Threshold
     # ---------------------------
-    # Define anomaly score as the mean squared error between input and reconstruction.
+    # Compute anomaly score as the mean squared error between input and reconstruction.
     def compute_anomaly_score(x):
         reconstructions = autoencoder(x)
-        loss = tf.keras.losses.mse(x, reconstructions)
-        return np.mean(loss, axis=1)
+        # Using tf.keras.losses.mean_squared_error returns a 1D tensor (one score per sample)
+        loss = tf.keras.losses.mean_squared_error(x, reconstructions)
+        return loss.numpy()  # Shape: (batch,)
 
-    # Set dynamic threshold (e.g., 99th percentile of normal training scores)
+    # Set a dynamic threshold: 99th percentile of anomaly scores on normal training data.
     train_loss = compute_anomaly_score(normal_train)
     threshold = np.percentile(train_loss, 99)
-    
-    # Anomaly detection: sample is anomaly if reconstruction error > threshold.
+
+    # Function to decide if a sample is anomalous.
     def is_anomaly(x):
         scores = compute_anomaly_score(x)
         return scores > threshold
 
-    # Compute overall accuracy on the test set.
-    # For normal samples (label True) we expect is_anomaly -> False;
-    # For anomalous samples (label False) we expect is_anomaly -> True.
+    # Compute overall test accuracy:
+    # For normal samples, we expect is_anomaly → False;
+    # For anomalies, we expect is_anomaly → True.
     test_preds = is_anomaly(test_data)
     overall_accuracy = np.mean(test_preds == (~test_labels)) * 100
     st.sidebar.write(f"**Overall Anomaly Detection Accuracy: {overall_accuracy:.2f}%**")
-    
+
     # ---------------------------
     # SHAP Explanation Setup
     # ---------------------------
-    # Create a wrapper model that outputs a scalar anomaly score.
+    # Define a wrapper model that outputs a scalar anomaly score for each sample.
     def anomaly_score_model(x):
         reconstruction = autoencoder(x)
         return tf.reduce_mean(tf.square(x - reconstruction), axis=1, keepdims=True)
-    
+
     # Use a background of 100 normal samples for DeepExplainer.
     background = normal_train[:100].astype(np.float32)
-    
+
     def shap_explanation(data, index):
         sample = data[index:index+1].astype(np.float32)
         explainer = shap.DeepExplainer(anomaly_score_model, background)
         shap_values = explainer.shap_values(sample)
-        # shap_values is a list with one array (because the model outputs a scalar)
+        # shap_values is a list with one array (since the model outputs a scalar)
         fig, ax = plt.subplots(figsize=(10, 5))
         shap.summary_plot(shap_values[0], sample,
                           feature_names=[f"Feature {i}" for i in range(data.shape[1])],
                           show=False)
         st.pyplot(fig)
-    
+
     # ---------------------------
     # Visualization
     # ---------------------------
     st.sidebar.title("ECG Anomaly Detection")
     ecg_type = st.sidebar.selectbox("Select ECG Type", ["Normal ECG", "Anomalous ECG"])
-    # Choose appropriate data for display
+    # Select display data based on type
     display_data = normal_test if ecg_type == "Normal ECG" else anomaly_test
     ecg_index = st.sidebar.slider("Select ECG Index", 0, len(display_data)-1, 0)
     show_shap = st.sidebar.checkbox("Show SHAP Explanation", False)
-    
+
     # Plot the selected ECG sample and its reconstruction.
     def plot_ecg(data, index):
         sample = data[index:index+1]
@@ -149,10 +151,10 @@ if df is not None:
         ax.fill_between(range(len(original)), original, reconstruction, color="lightcoral", alpha=0.5, label="Error")
         ax.legend()
         st.pyplot(fig)
-    
+
     st.write("### ECG Sample")
     plot_ecg(display_data, ecg_index)
-    
+
     if show_shap:
         st.write("### SHAP Explanation for Anomaly Score")
         shap_explanation(display_data, ecg_index)
