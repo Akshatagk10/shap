@@ -9,7 +9,7 @@ from sklearn.model_selection import train_test_split
 import warnings
 
 warnings.filterwarnings("ignore")
-st.set_page_config(page_title="ECG Anomaly Detection", page_icon="💓", layout="wide")
+st.set_page_config(page_title="SHAP ECG Anomaly Detection", page_icon="💓", layout="wide")
 
 # ---------------------------
 # Data Loading & Preprocessing
