@@ -42,11 +42,11 @@ if df is not None:
     train_data = (train_data - min_val) / (max_val - min_val)
     test_data = (test_data - min_val) / (max_val - min_val)
 
-    # Use only normal samples for training (i.e. where label==True)
+    # Use only normal samples for training (i.e., where label == True)
     normal_train = train_data[train_labels]
-    # For testing, separate normal and anomalous examples
-    normal_test = test_data[train_labels]
-    anomaly_test = test_data[~train_labels]
+    # For testing, separate normal and anomalous examples using test_labels
+    normal_test = test_data[test_labels]
+    anomaly_test = test_data[~test_labels]
 
     # ---------------------------
     # Model Definition & Training
@@ -88,11 +88,11 @@ if df is not None:
     # Compute anomaly score as the mean squared error between input and reconstruction.
     def compute_anomaly_score(x):
         reconstructions = autoencoder(x)
-        # Using tf.keras.losses.mean_squared_error returns a 1D tensor (one score per sample)
         loss = tf.keras.losses.mean_squared_error(x, reconstructions)
-        return loss.numpy()  # Shape: (batch,)
+        # loss is a 1D tensor: one score per sample
+        return loss.numpy()
 
-    # Set a dynamic threshold: 99th percentile of anomaly scores on normal training data.
+    # Set a dynamic threshold (e.g., 99th percentile of anomaly scores on normal training data).
     train_loss = compute_anomaly_score(normal_train)
     threshold = np.percentile(train_loss, 99)
 
@@ -102,8 +102,8 @@ if df is not None:
         return scores > threshold
 
     # Compute overall test accuracy:
-    # For normal samples, we expect is_anomaly → False;
-    # For anomalies, we expect is_anomaly → True.
+    # For normal samples (True), we expect is_anomaly → False;
+    # For anomalies (False), we expect is_anomaly → True.
     test_preds = is_anomaly(test_data)
     overall_accuracy = np.mean(test_preds == (~test_labels)) * 100
     st.sidebar.write(f"**Overall Anomaly Detection Accuracy: {overall_accuracy:.2f}%**")
@@ -111,7 +111,7 @@ if df is not None:
     # ---------------------------
     # SHAP Explanation Setup
     # ---------------------------
-    # Define a wrapper model that outputs a scalar anomaly score for each sample.
+    # Define a wrapper model that outputs a scalar anomaly score per sample.
     def anomaly_score_model(x):
         reconstruction = autoencoder(x)
         return tf.reduce_mean(tf.square(x - reconstruction), axis=1, keepdims=True)
@@ -135,7 +135,7 @@ if df is not None:
     # ---------------------------
     st.sidebar.title("ECG Anomaly Detection")
     ecg_type = st.sidebar.selectbox("Select ECG Type", ["Normal ECG", "Anomalous ECG"])
-    # Select display data based on type
+    # Select display data based on chosen type.
     display_data = normal_test if ecg_type == "Normal ECG" else anomaly_test
     ecg_index = st.sidebar.slider("Select ECG Index", 0, len(display_data)-1, 0)
     show_shap = st.sidebar.checkbox("Show SHAP Explanation", False)
