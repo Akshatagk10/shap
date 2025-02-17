@@ -14,7 +14,7 @@ from sklearn.preprocessing import MinMaxScaler
 warnings.filterwarnings("ignore")
 
 # Set Streamlit page config
-st.set_page_config(page_title="ECG Anomaly Detection", page_icon="💓", layout="wide")
+st.set_page_config(page_title="SHAP ECG Anomaly Detection", page_icon="💓", layout="wide")
 
 # Enable GPU memory growth if available
 gpus = tf.config.experimental.list_physical_devices('GPU')
