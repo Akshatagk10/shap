@@ -23,7 +23,7 @@ def load_data(file=None):
         df = pd.read_csv(url, header=None)
     return df
 
-# Allow user to upload data; otherwise, load default dataset.
+# Allow user to upload data; otherwise, load the default dataset.
 uploaded_file = st.sidebar.file_uploader("Upload your ECG data (CSV)", type=["csv"])
 df = load_data(uploaded_file)
 
@@ -32,7 +32,7 @@ if df is not None:
     data = df.iloc[:, :-1].values
     labels = df.iloc[:, -1].values.astype(bool)
 
-    # Split into training and test sets
+    # Split into training and test sets.
     train_data, test_data, train_labels, test_labels = train_test_split(
         data, labels, test_size=0.2, random_state=21
     )
@@ -42,11 +42,11 @@ if df is not None:
     train_data = (train_data - min_val) / (max_val - min_val)
     test_data = (test_data - min_val) / (max_val - min_val)
 
-    # Use only normal samples (label==True) for training
+    # Use only normal samples (label == True) for training.
     normal_train = train_data[train_labels]
-    # In test set, separate normal and anomalous examples
-    normal_test = test_data[train_labels]
-    anomaly_test = test_data[~train_labels]
+    # For test set, separate normal and anomalous examples using test_labels.
+    normal_test = test_data[test_labels]
+    anomaly_test = test_data[~test_labels]
 
     # ---------------------------
     # Model Definition & Training
@@ -76,7 +76,7 @@ if df is not None:
     def load_model():
         model = ECG_Autoencoder()
         model.compile(optimizer='adam', loss='mse')
-        # Train only on normal ECG data
+        # Train only on normal ECG data.
         model.fit(normal_train, normal_train, epochs=100, batch_size=256, validation_split=0.1, verbose=1)
         return model
 
@@ -106,7 +106,7 @@ if df is not None:
     # For anomalies (False), we expect is_anomaly → True.
     test_preds = is_anomaly(test_data)
     overall_accuracy = np.mean(test_preds == (~test_labels)) * 100
-    # st.sidebar.write(f"**Overall Anomaly Detection Accuracy: {overall_accuracy:.2f}%**")
+    st.sidebar.write(f"**Overall Anomaly Detection Accuracy: {overall_accuracy:.2f}%**")
 
     # ---------------------------
     # SHAP Explanation Setup
@@ -116,9 +116,10 @@ if df is not None:
         def __init__(self, autoencoder):
             super(AnomalyScoreModel, self).__init__()
             self.autoencoder = autoencoder
+
         def call(self, inputs):
             reconstruction = self.autoencoder(inputs)
-            # Return per-sample anomaly score as scalar
+            # Return per-sample anomaly score as a scalar.
             return tf.reduce_mean(tf.square(inputs - reconstruction), axis=1, keepdims=True)
 
     anomaly_model = AnomalyScoreModel(autoencoder)
@@ -130,7 +131,7 @@ if df is not None:
         sample = data[index:index+1].astype(np.float32)
         explainer = shap.DeepExplainer(anomaly_model, background)
         shap_values = explainer.shap_values(sample)
-        # shap_values is a list with one array (since the model outputs a scalar)
+        # shap_values is a list with one array (since the model outputs a scalar).
         fig, ax = plt.subplots(figsize=(10, 5))
         shap.summary_plot(shap_values[0], sample,
                           feature_names=[f"Feature {i}" for i in range(data.shape[1])],
@@ -142,9 +143,9 @@ if df is not None:
     # ---------------------------
     st.sidebar.title("ECG Anomaly Detection")
     ecg_type = st.sidebar.selectbox("Select ECG Type", ["Normal ECG", "Anomalous ECG"])
-    # Choose display data based on type
+    # Choose display data based on type.
     display_data = normal_test if ecg_type == "Normal ECG" else anomaly_test
-    ecg_index = st.sidebar.slider("Select ECG Index", 0, len(display_data)-1, 0)
+    ecg_index = st.sidebar.slider("Select ECG Index", 0, len(display_data) - 1, 0)
     show_shap = st.sidebar.checkbox("Show SHAP Explanation", False)
 
     # Plot the selected ECG sample and its reconstruction.
