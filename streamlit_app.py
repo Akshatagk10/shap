@@ -23,7 +23,7 @@ def load_data(file=None):
         df = pd.read_csv(url, header=None)
     return df
 
-# Allow user to upload data; otherwise, load the default dataset.
+# Allow user to upload data; otherwise, load default dataset.
 uploaded_file = st.sidebar.file_uploader("Upload your ECG data (CSV)", type=["csv"])
 df = load_data(uploaded_file)
 
@@ -88,7 +88,6 @@ if df is not None:
     # Compute anomaly score as the mean squared error between input and reconstruction.
     def compute_anomaly_score(x):
         reconstructions = autoencoder(x)
-        # Compute per-sample MSE over features.
         loss = tf.reduce_mean(tf.square(x - reconstructions), axis=1)
         return loss.numpy()  # Shape: (num_samples,)
 
@@ -106,23 +105,16 @@ if df is not None:
     # For anomalies (False), we expect is_anomaly → True.
     test_preds = is_anomaly(test_data)
     overall_accuracy = np.mean(test_preds == (~test_labels)) * 100
-    st.sidebar.write(f"**Overall Anomaly Detection Accuracy: {overall_accuracy:.2f}%**")
+    # st.sidebar.write(f"**Overall Anomaly Detection Accuracy: {overall_accuracy:.2f}%**")
 
     # ---------------------------
     # SHAP Explanation Setup
     # ---------------------------
-    # Wrap the autoencoder into a Keras model that outputs a scalar anomaly score.
-    class AnomalyScoreModel(Model):
-        def __init__(self, autoencoder):
-            super(AnomalyScoreModel, self).__init__()
-            self.autoencoder = autoencoder
-
-        def call(self, inputs):
-            reconstruction = self.autoencoder(inputs)
-            # Return per-sample anomaly score as a scalar.
-            return tf.reduce_mean(tf.square(inputs - reconstruction), axis=1, keepdims=True)
-
-    anomaly_model = AnomalyScoreModel(autoencoder)
+    # Create a functional Keras model that outputs the anomaly score.
+    input_layer = tf.keras.Input(shape=(140,))
+    reconstruction = autoencoder(input_layer)
+    anomaly_score_output = tf.reduce_mean(tf.square(input_layer - reconstruction), axis=1, keepdims=True)
+    anomaly_model = tf.keras.Model(inputs=input_layer, outputs=anomaly_score_output)
 
     # Use a background of 100 normal samples for DeepExplainer.
     background = normal_train[:100].astype(np.float32)
@@ -131,7 +123,7 @@ if df is not None:
         sample = data[index:index+1].astype(np.float32)
         explainer = shap.DeepExplainer(anomaly_model, background)
         shap_values = explainer.shap_values(sample)
-        # shap_values is a list with one array (since the model outputs a scalar).
+        # shap_values is a list with one array (since the model outputs a scalar)
         fig, ax = plt.subplots(figsize=(10, 5))
         shap.summary_plot(shap_values[0], sample,
                           feature_names=[f"Feature {i}" for i in range(data.shape[1])],
