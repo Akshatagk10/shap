@@ -12,7 +12,7 @@ import warnings
 warnings.filterwarnings("ignore")
 
 # Set Streamlit page configuration
-st.set_page_config(page_title="ECG Anomaly Detection", page_icon="💓", layout="wide")
+st.set_page_config(page_title="SHAP ECG Anomaly Detection", page_icon="💓", layout="wide")
 
 # Load and preprocess data
 @st.cache_data
