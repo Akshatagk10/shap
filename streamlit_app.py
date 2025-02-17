@@ -12,7 +12,7 @@ import warnings
 warnings.filterwarnings("ignore")
 
 # Set Streamlit page configuration
-st.set_page_config(page_title="SHAP ECG Anomaly Detection", page_icon="💓", layout="wide")
+st.set_page_config(page_title="SHAP ECG Anomaly Detection", page_icon="💕", layout="wide")
 
 # Load and preprocess data
 @st.cache_data
@@ -21,19 +21,19 @@ def load_data():
     df = pd.read_csv(url, header=None)
     return df
 
-# Build improved Autoencoder model
+# Define improved Autoencoder model
 class ECGAutoencoder(Model):
     def __init__(self):
         super(ECGAutoencoder, self).__init__()
         self.encoder = tf.keras.Sequential([
-            layers.Dense(64, activation='relu'),
+            layers.Dense(128, activation='relu'),
             layers.Dropout(0.1),
-            layers.Dense(32, activation='relu'),
-            layers.Dense(16, activation='relu')
+            layers.Dense(64, activation='relu'),
+            layers.Dense(32, activation='relu')
         ])
         self.decoder = tf.keras.Sequential([
-            layers.Dense(32, activation='relu'),
             layers.Dense(64, activation='relu'),
+            layers.Dense(128, activation='relu'),
             layers.Dense(140, activation='sigmoid')
         ])
 
@@ -59,7 +59,7 @@ scaler = MinMaxScaler()
 data = scaler.fit_transform(data)
 
 # Split data
-train_data, test_data, train_labels, test_labels = train_test_split(data, labels, test_size=0.2, random_state=21)
+train_data, test_data, train_labels, test_labels = train_test_split(data, labels, test_size=0.2, random_state=42)
 
 # Separate normal and abnormal data
 normal_train = train_data[train_labels == 0]
@@ -75,11 +75,11 @@ def compute_anomaly_score(data):
     loss = losses.mae(reconstructed, data)
     return loss.numpy()
 
-# Determine threshold
+# Determine anomaly threshold
 train_loss = compute_anomaly_score(normal_train)
 threshold = np.mean(train_loss) + 3 * np.std(train_loss)
 
-# Define anomaly detection function
+# Function to check for anomalies
 def is_anomaly(data):
     scores = compute_anomaly_score(data)
     return scores > threshold
@@ -121,7 +121,8 @@ def shap_explanation(data, index):
 if show_shap:
     shap_explanation(selected_data, ecg_index)
 
-# Accuracy Calculation
-predictions = is_anomaly(test_data)
-accuracy = np.mean(predictions == (test_labels == 1)) * 100
-st.sidebar.write(f"Anomaly Detection Accuracy: {accuracy:.2f}%")
+# Accuracy Calculation Button
+if st.sidebar.button("Compute Accuracy"):
+    predictions = is_anomaly(test_data)
+    accuracy = np.mean(predictions == (test_labels == 1)) * 100
+    st.sidebar.write(f"Anomaly Detection Accuracy: **{accuracy:.2f}%**")
